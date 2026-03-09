@@ -166,6 +166,56 @@ async function runOllamaReview(prompt: string) {
   return ollamaJson.response;
 }
 
+async function runOpenAiCompatibleLocalReview(prompt: string) {
+  const baseUrl = process.env.LOCAL_OPENAI_BASE_URL ?? "http://127.0.0.1:1234/v1";
+  const model = process.env.LOCAL_OPENAI_MODEL ?? "gpt-oss-20b";
+  const apiKey = process.env.LOCAL_OPENAI_API_KEY ?? "local";
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a strict code reviewer. Return valid JSON only. Do not include markdown code fences.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed local OpenAI-compatible request: ${errorText}`);
+  }
+
+  const json = (await response.json()) as {
+    choices?: Array<{
+      message?: {
+        content?: string | null;
+      };
+    }>;
+  };
+
+  const content = json.choices?.[0]?.message?.content ?? "";
+  if (!content.trim()) {
+    throw new Error("Local OpenAI-compatible server returned an empty response.");
+  }
+
+  return content;
+}
+
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
@@ -186,7 +236,9 @@ export async function POST(request: Request) {
     const rawText =
       provider === "openai"
         ? await runOpenAiReview(reviewPrompt)
-        : await runOllamaReview(reviewPrompt);
+        : provider === "openai_compatible_local"
+          ? await runOpenAiCompatibleLocalReview(reviewPrompt)
+          : await runOllamaReview(reviewPrompt);
     const rawReview = JSON.parse(extractJsonObject(rawText));
     const review = reviewResponseSchema.parse(rawReview);
 
