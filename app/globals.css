@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f4f8ff;
+  --foreground: #13233f;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Segoe UI", "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", "Fira Code", monospace;
+}
+
+body {
+  background:
+    radial-gradient(circle at 0% 0%, #dff3ff 0, transparent 32%),
+    radial-gradient(circle at 100% 0%, #e8f7ef 0, transparent 28%),
+    var(--background);
+  color: var(--foreground);
+  font-family: "Segoe UI", "SF Pro Text", "Helvetica Neue", sans-serif;
+}
