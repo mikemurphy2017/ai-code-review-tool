@@ -14,7 +14,7 @@ Users can:
 ## Tech Stack
 - Next.js (App Router, TypeScript)
 - Tailwind CSS
-- OpenAI Responses API
+- Ollama (local AI runtime) or OpenAI Responses API
 - Zod validation for request/response safety
 
 ## MVP Features
@@ -41,22 +41,36 @@ Users can:
 ```bash
 npm install
 ```
-2. Configure environment:
+2. Start Ollama locally (default mode):
+```bash
+ollama serve
+ollama pull llama3.1:8b
+```
+3. Configure environment:
 ```bash
 cp .env.example .env.local
 ```
-3. Set your API key in `.env.local`:
+4. Use local AI in `.env.local`:
 ```env
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-4.1-mini
+AI_PROVIDER=ollama
+OLLAMA_ENDPOINT=http://127.0.0.1:11434
+OLLAMA_MODEL=llama3.1:8b
 ```
-4. Run the app:
+5. Run the app:
 ```bash
 npm run dev
 ```
-5. Open:
+6. Open:
 ```text
 http://localhost:3000
+```
+
+## Optional OpenAI Mode
+If you prefer cloud inference:
+```env
+AI_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4.1-mini
 ```
 
 ## API Contract

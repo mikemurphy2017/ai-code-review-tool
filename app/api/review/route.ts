@@ -45,9 +45,125 @@ Rules:
 - Return 3-5 issues when possible.
 - Return 3-5 suggestions.
 - Use lineHint when you can infer a location (for example "line 12" or "function fetchData").
+- Return JSON only with this shape:
+{
+  "summary": "string",
+  "issues": [
+    {
+      "title": "string",
+      "description": "string",
+      "severity": "low | medium | high",
+      "lineHint": "string (optional)",
+      "suggestedFix": "string"
+    }
+  ],
+  "suggestions": ["string"]
+}
 
 Code:
 ${code}`;
+}
+
+function extractJsonObject(input: string): string {
+  const trimmed = input.trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("Model did not return valid JSON.");
+  }
+
+  return trimmed.slice(start, end + 1);
+}
+
+async function runOpenAiReview(prompt: string) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is missing on the server.");
+  }
+
+  const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
+  const aiResponse = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text: "You are a strict code reviewer. Return only valid JSON matching the schema.",
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "input_text", text: prompt }],
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "code_review",
+          schema: outputSchema,
+          strict: true,
+        },
+      },
+    }),
+  });
+
+  if (!aiResponse.ok) {
+    const errorText = await aiResponse.text();
+    throw new Error(`Failed OpenAI request: ${errorText}`);
+  }
+
+  const aiJson = (await aiResponse.json()) as {
+    output_text?: string;
+  };
+
+  if (!aiJson.output_text) {
+    throw new Error("OpenAI returned an empty response.");
+  }
+
+  return aiJson.output_text;
+}
+
+async function runOllamaReview(prompt: string) {
+  const endpoint = process.env.OLLAMA_ENDPOINT ?? "http://127.0.0.1:11434";
+  const model = process.env.OLLAMA_MODEL ?? "llama3.1:8b";
+
+  const ollamaResponse = await fetch(`${endpoint}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      prompt,
+      stream: false,
+      format: "json",
+      options: {
+        temperature: 0.2,
+      },
+    }),
+  });
+
+  if (!ollamaResponse.ok) {
+    const errorText = await ollamaResponse.text();
+    throw new Error(`Failed Ollama request: ${errorText}`);
+  }
+
+  const ollamaJson = (await ollamaResponse.json()) as {
+    response?: string;
+  };
+
+  if (!ollamaJson.response) {
+    throw new Error("Ollama returned an empty response.");
+  }
+
+  return ollamaJson.response;
 }
 
 export async function POST(request: Request) {
@@ -65,73 +181,13 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "OPENAI_API_KEY is missing on the server." },
-        { status: 500 },
-      );
-    }
-
-    const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
     const reviewPrompt = buildPrompt(parsed.data);
-
-    const aiResponse = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        input: [
-          {
-            role: "system",
-            content: [
-              {
-                type: "input_text",
-                text: "You are a strict code reviewer. Return only valid JSON matching the schema.",
-              },
-            ],
-          },
-          {
-            role: "user",
-            content: [{ type: "input_text", text: reviewPrompt }],
-          },
-        ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "code_review",
-            schema: outputSchema,
-            strict: true,
-          },
-        },
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      return NextResponse.json(
-        {
-          error: "Failed to get AI review",
-          details: errorText,
-        },
-        { status: 502 },
-      );
-    }
-
-    const aiJson = (await aiResponse.json()) as {
-      output_text?: string;
-    };
-
-    if (!aiJson.output_text) {
-      return NextResponse.json(
-        { error: "AI returned an empty response." },
-        { status: 502 },
-      );
-    }
-
-    const rawReview = JSON.parse(aiJson.output_text);
+    const provider = (process.env.AI_PROVIDER ?? "ollama").toLowerCase();
+    const rawText =
+      provider === "openai"
+        ? await runOpenAiReview(reviewPrompt)
+        : await runOllamaReview(reviewPrompt);
+    const rawReview = JSON.parse(extractJsonObject(rawText));
     const review = reviewResponseSchema.parse(rawReview);
 
     return NextResponse.json(review, { status: 200 });
